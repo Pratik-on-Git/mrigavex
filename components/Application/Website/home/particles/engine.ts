@@ -478,8 +478,14 @@ export function animateGraphic(
             hasDrawn = true
             callbacks.onFirstFrame()
         }
-        if (isIntroRunning) isBusy = true
-        else if (isIntro) introStart = -1
+        if (isIntroRunning) {
+            isBusy = true
+        } else if (isIntro) {
+            // Nothing else is moving on this frame, and the base animation can only begin
+            // on the next one, so without this the loop would stop here and never start it.
+            introStart = -1
+            isBusy = true
+        }
         if (isBusy) frameId = requestAnimationFrame(frame)
     }
 
