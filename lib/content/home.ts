@@ -14,6 +14,9 @@
 
 import type { LeadSource } from "../leadConfig.ts"
 
+// How a graphic moves: see components/Application/Website/home/particles/behaviours.ts.
+export type ParticleStyle = "burst" | "loops" | "target" | "scan" | "pinwheel" | "drive" | "breathe"
+
 const GRAPHIC = {
     starburst: "/img/base/starburst.svg",
     loops: "/img/base/loops.svg",
@@ -82,7 +85,7 @@ export const HOME_CONTENT = {
                 body: "Build meaningful partnerships, assess investment opportunities and enter new markets with informed, sustainable ambition.",
                 cta: "Explore Venture Advisory",
             },
-        ] as { id: string; topic: LeadSource; image: { src: string }; particles: "burst" | "loops" | "target"; title: string; body: string; cta: string }[],
+        ] as { id: string; topic: LeadSource; image: { src: string }; particles: ParticleStyle; title: string; body: string; cta: string }[],
     },
 
     practice: {
@@ -111,26 +114,30 @@ export const HOME_CONTENT = {
                 title: "Diagnose",
                 body: "Begin with an honest, unfiltered diagnosis of where the challenge truly lies.",
                 image: { src: GRAPHIC.target },
+                particles: "scan",
             },
             {
                 title: "Design",
                 body: "Co-create an ambitious transformation architecture grounded in actual capability.",
                 image: { src: GRAPHIC.starburst },
+                particles: "pinwheel",
                 tint: "#C0852D",
             },
             {
                 title: "Deliver",
                 body: "Stay engaged through implementation, including its most demanding moments.",
                 image: { src: GRAPHIC.starburst },
+                particles: "drive",
                 tint: "#2B8F8A",
             },
             {
                 title: "Sustain",
                 body: "Develop the independence to sustain and evolve what has been built.",
                 image: { src: GRAPHIC.loops },
+                particles: "breathe",
                 tint: "#A05DDB",
             },
-        ] as { title: string; body: string; image: { src: string }; tint?: string }[],
+        ] as { title: string; body: string; image: { src: string }; particles: ParticleStyle; tint?: string }[],
     },
 
     leadership: {

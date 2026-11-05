@@ -382,7 +382,7 @@ export function animateGraphic(
                     force.y *= energy
                     force.glow *= energy
                 }
-                if (pointer) behaviour.hover(tile, pointer, focus, force)
+                if (pointer) behaviour.hover(tile, pointer, focus, force, now)
                 for (const ripple of ripples) {
                     const front = (now - ripple.start) * TAP_SPEED
                     const dx = tile.x - ripple.x

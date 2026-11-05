@@ -1,6 +1,6 @@
-import Image from "next/image"
 import { HOME_CONTENT } from "@/lib/content/home"
 import ArrowCircle from "./ArrowCircle"
+import ParticleGraphic from "./particles/ParticleGraphic"
 
 const { vision } = HOME_CONTENT
 
@@ -48,8 +48,8 @@ export default function Vision() {
                     {vision.steps.map((step) => (
                         <li key={step.title}>
                             <div className="relative isolate aspect-square overflow-hidden rounded-2xl bg-mx-navy">
-                                <Image src={step.image.src} alt="" fill sizes="(min-width: 1024px) 276px, (min-width: 640px) 50vw, 100vw" className="object-cover" />
-                                {step.tint && <div aria-hidden className="absolute inset-0 mix-blend-color" style={{ backgroundColor: step.tint }} />}
+                                <ParticleGraphic src={step.image.src} behaviour={step.particles} />
+                                {step.tint && <div aria-hidden className="pointer-events-none absolute inset-0 mix-blend-color" style={{ backgroundColor: step.tint }} />}
                             </div>
                             <h3 className="mt-4 text-2xl leading-none font-semibold tracking-[-0.025em] text-[#F7F7F7] uppercase">{step.title}</h3>
                             <p className="mt-6 text-[19.2px] leading-[25px]">{step.body}</p>
