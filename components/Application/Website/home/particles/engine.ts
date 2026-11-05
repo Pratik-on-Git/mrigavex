@@ -1,8 +1,11 @@
 import type { Behaviour, Force, Point, Tile } from "./behaviours"
 
-// Under one cell of the graphics' lattice (about 6.67), so that even a single dot of
-// the picture breaks into several particles. Script time grows with the tile count.
-const TILE = 5
+// The size of a particle, in units: about one CSS pixel on a desktop card, so even a
+// single dot of the picture (about 6.67 units) breaks into a dozen or so.
+const PARTICLE = 2
+// The spacing of the motion grid. Behaviours run here, in JavaScript, and the GPU
+// interpolates for the particles between. Their features are all far wider than this.
+const NODE = 12
 
 const STIFFNESS = 170
 const DAMPING = 17
@@ -15,16 +18,23 @@ const TAP_WIDTH = 34
 const TAP_NUDGE = 12
 // How much stronger the base animation runs while the card is hovered or focused.
 const ACTIVE_ENERGY = 1.5
-// A tile this close to home (in units) stays exactly there. Neighbours a pixel apart
-// would otherwise crack solid areas with hairlines, far from any visible motion.
-const DEAD_ZONE = 1.5
-// Below full white, so that a bright tile's dots stay distinct from its background.
+
+// A particle this close to home (in units) stays exactly there. Neighbours a pixel
+// apart would otherwise crack solid areas with hairlines, far from any visible motion.
+const DEAD_ZONE = "1.5"
+// Below full white, so that bright dots stay distinct from their background.
 const MAX_GLOW = 0.86
+// How far a particle strays from its neighbours, as a share of how far they all move.
+// The grid moves smoothly, so this is what makes it read as particles and not a lens.
+const STRAY = "0.55"
 
 const VERTEX_SHADER = `#version 300 es
 in vec4 rectangle;
-in vec4 state;
+in vec2 seed;
 uniform vec2 size;
+uniform vec2 scale;
+uniform vec2 nodeExtent;
+uniform highp sampler2D nodes;
 uniform bool isCore;
 uniform vec4 coreRectangle;
 uniform vec4 coreState;
@@ -42,9 +52,19 @@ void main() {
         glow = coreState.z;
         alpha = 1.0;
     } else {
-        position = source + state.xy;
-        glow = state.z;
-        alpha = state.w;
+        vec2 home = (box.xy + box.zw / 2.0) / scale;
+        vec4 node = textureLod(nodes, home / nodeExtent, 0.0);
+        float amount = length(node.xy);
+        vec2 move = vec2(0.0);
+        if (amount >= ${DEAD_ZONE}) {
+            move = node.xy * (0.7 + 0.6 * seed.x) + (seed - 0.5) * 2.0 * amount * ${STRAY};
+        }
+        // Whole device pixels: this is what keeps a particle in flight pixel-sharp.
+        position = source + round(move * scale);
+        glow = min(${MAX_GLOW.toFixed(2)}, node.z * (0.75 + 0.5 * seed.y));
+        // Particles appear at different moments as their part of the grid fades in.
+        float threshold = seed.y * 0.8;
+        alpha = smoothstep(threshold, threshold + 0.2, node.w);
     }
     source /= size;
     gl_Position = vec4(position.x / size.x * 2.0 - 1.0, 1.0 - position.y / size.y * 2.0, 0.0, 1.0);
@@ -110,11 +130,12 @@ function createProgram(gl: WebGL2RenderingContext) {
 // undoes it, or null if this browser can't, in which case the static image should stay.
 //
 // It uses WebGL because of what was measured with all three cards running: moving SVG
-// nodes took 79ms a frame and 15,000 Canvas 2D copies took 200ms, while one instanced
-// draw call barely registers. Each tile copies its rectangle of a coverage texture,
-// rasterised from the vector paths at the canvas's own resolution, to whole device
-// pixels, so nothing is resampled and a tile in flight is as sharp as one at home.
-// The loop stops once the card is out of view and everything has settled.
+// nodes took 79ms a frame and 15,000 Canvas 2D copies took 200ms. Even on WebGL, running
+// the springs per particle in JavaScript cost 7ms at a 5-unit size, so the particles
+// here (over 100,000) only read a small grid of springs from a texture. Each one copies
+// its rectangle of a coverage texture, rasterised from the vector paths at the canvas's
+// own resolution, to whole device pixels, so nothing is resampled and it stays as sharp
+// in flight as at home. The loop stops once the card is out of view and has settled.
 export function animateGraphic(
     host: HTMLElement,
     canvas: HTMLCanvasElement,
@@ -128,6 +149,7 @@ export function animateGraphic(
 
     const uniform = (name: string) => gl.getUniformLocation(program, name)
     const sizeUniform = uniform("size")
+    const scaleUniform = uniform("scale")
     const isCoreUniform = uniform("isCore")
     const coreRectangleUniform = uniform("coreRectangle")
     const coreStateUniform = uniform("coreState")
@@ -137,48 +159,92 @@ export function animateGraphic(
     const [lightRed, lightGreen, lightBlue] = toUnits(graphic.light)
     gl.useProgram(program)
     gl.uniform3f(uniform("light"), lightRed, lightGreen, lightBlue)
+    gl.uniform1i(uniform("coverage"), 0)
+    gl.uniform1i(uniform("nodes"), 1)
     gl.clearColor(darkRed, darkGreen, darkBlue, 1)
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
-    const texture = gl.createTexture()
-    gl.bindTexture(gl.TEXTURE_2D, texture)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    const createTexture = (unit: number) => {
+        const texture = gl.createTexture()
+        gl.activeTexture(unit)
+        gl.bindTexture(gl.TEXTURE_2D, texture)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    }
+    createTexture(gl.TEXTURE0)
+    createTexture(gl.TEXTURE1)
 
-    const rectangleBuffer = gl.createBuffer()
-    const stateBuffer = gl.createBuffer()
-    const vertexArray = gl.createVertexArray()
-    gl.bindVertexArray(vertexArray)
-    const pointAttribute = (name: string, buffer: WebGLBuffer) => {
+    const particleBuffer = gl.createBuffer()
+    gl.bindVertexArray(gl.createVertexArray())
+    gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer)
+    const pointAttribute = (name: string, components: number, offset: number) => {
         const location = gl.getAttribLocation(program, name)
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
         gl.enableVertexAttribArray(location)
-        gl.vertexAttribPointer(location, 4, gl.FLOAT, false, 0, 0)
+        gl.vertexAttribPointer(location, components, gl.FLOAT, false, 24, offset)
         gl.vertexAttribDivisor(location, 1)
     }
-    pointAttribute("rectangle", rectangleBuffer)
-    pointAttribute("state", stateBuffer)
+    pointAttribute("rectangle", 4, 0)
+    pointAttribute("seed", 2, 16)
 
     const focus: Point = graphic.core
         ? { x: graphic.core.x + graphic.core.width / 2, y: graphic.core.y + graphic.core.height / 2 }
         : (behaviour.focus as Point)
 
+    // The motion grid covers every cell, dark ones too, so that interpolating between
+    // two nodes across an empty cell can't pull a particle's movement towards nothing.
+    const nodeColumns = Math.ceil(graphic.width / NODE)
+    const nodeRows = Math.ceil(graphic.height / NODE)
+    const tiles: Tile[] = []
+    for (let row = 0; row < nodeRows; row++) {
+        for (let column = 0; column < nodeColumns; column++) {
+            const x = (column + 0.5) * NODE
+            const y = (row + 0.5) * NODE
+            const tile: Tile = {
+                x,
+                y,
+                fromFocusX: x - focus.x,
+                fromFocusY: y - focus.y,
+                radius: Math.sqrt((x - focus.x) ** 2 + (y - focus.y) ** 2),
+                strayX: (Math.random() - 0.5) * 1.5,
+                strayY: (Math.random() - 0.5) * 1.5,
+                reach: 0.65 + Math.random() * 0.7,
+                jitter: Math.random(),
+                angle: 0,
+                band: 0,
+                weight: 0,
+            }
+            behaviour.prepare?.(tile)
+            tiles.push(tile)
+        }
+    }
+    const count = tiles.length
+    const delay = Float32Array.from(tiles, behaviour.introDelay)
+    const offsetX = new Float32Array(count)
+    const offsetY = new Float32Array(count)
+    const speedX = new Float32Array(count)
+    const speedY = new Float32Array(count)
+    const glow = new Float32Array(count)
+    // Red and green: the movement in units. Blue: the glow. Alpha: the intro's fade.
+    const nodeData = new Float32Array(count * 4).fill(1)
+    for (let index = 0; index < count; index++) {
+        nodeData[index * 4] = 0
+        nodeData[index * 4 + 1] = 0
+        nodeData[index * 4 + 2] = 0
+    }
+    gl.activeTexture(gl.TEXTURE1)
+    // Half floats can be filtered in every WebGL2 browser. Full floats need an extension.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, nodeColumns, nodeRows, 0, gl.RGBA, gl.FLOAT, nodeData)
+    gl.uniform2f(uniform("nodeExtent"), nodeColumns * NODE, nodeRows * NODE)
+
     let scale = 1
     let scaleY = 1
-    let tiles: Tile[] = []
-    let delay = new Float32Array(0)
-    let offsetX = new Float32Array(0)
-    let offsetY = new Float32Array(0)
-    let speedX = new Float32Array(0)
-    let speedY = new Float32Array(0)
-    let glow = new Float32Array(0)
-    let state = new Float32Array(0)
+    let particleCount = 0
 
-    // Sizes everything to the canvas's device pixels. Tile edges are rounded from the
-    // same grid on both sides, so at any scale neighbours meet with no gap or overlap.
+    // Sizes everything to the canvas's device pixels. Particle edges are rounded from
+    // the same grid on both sides, so at any scale neighbours meet with no gap or overlap.
     const build = () => {
         const cssWidth = canvas.getBoundingClientRect().width
         const width = Math.round(cssWidth * window.devicePixelRatio)
@@ -193,9 +259,10 @@ export function animateGraphic(
         canvas.height = height
         gl.viewport(0, 0, width, height)
         gl.uniform2f(sizeUniform, width, height)
+        gl.uniform2f(scaleUniform, scale, scaleY)
 
-        // Coverage rather than colour, so that tiles can blend from light to white over
-        // the dark background as the raster did: red is the tiles, green the core.
+        // Coverage rather than colour, so that particles can blend from light to white
+        // over the dark background as the raster did: red is them, green the core.
         const raster = document.createElement("canvas")
         raster.width = width
         raster.height = height
@@ -211,63 +278,42 @@ export function animateGraphic(
             const top = Math.floor(graphic.core.y * scaleY)
             gl.uniform4f(coreRectangleUniform, left, top, Math.ceil(graphic.core.width * scale) + 1, Math.ceil(graphic.core.height * scaleY) + 1)
         }
+        gl.activeTexture(gl.TEXTURE0)
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, raster)
 
-        // Empty cells would only cost an instance, so they don't become tiles.
+        // Empty cells would only cost an instance, so they don't become particles.
         const { data } = context.getImageData(0, 0, width, height)
-        const isEmpty = (left: number, top: number, right: number, bottom: number) => {
-            for (let y = top; y < bottom; y++) {
-                for (let x = left; x < right; x++) if (data[(y * width + x) * 4]) return false
-            }
-            return true
-        }
-
-        const rectangles: number[] = []
-        const nextTiles: Tile[] = []
-        for (let row = 0; row * TILE < graphic.height; row++) {
-            for (let column = 0; column * TILE < graphic.width; column++) {
-                const left = Math.round(column * TILE * scale)
-                const top = Math.round(row * TILE * scaleY)
-                const right = Math.min(width, Math.round((column + 1) * TILE * scale))
-                const bottom = Math.min(height, Math.round((row + 1) * TILE * scaleY))
-                if (right <= left || bottom <= top || isEmpty(left, top, right, bottom)) continue
-
-                const x = (column + 0.5) * TILE
-                const y = (row + 0.5) * TILE
-                const tile: Tile = {
-                    x,
-                    y,
-                    fromFocusX: x - focus.x,
-                    fromFocusY: y - focus.y,
-                    radius: Math.sqrt((x - focus.x) ** 2 + (y - focus.y) ** 2),
-                    strayX: (Math.random() - 0.5) * 1.5,
-                    strayY: (Math.random() - 0.5) * 1.5,
-                    reach: 0.65 + Math.random() * 0.7,
-                    jitter: Math.random(),
-                    angle: 0,
-                    band: 0,
-                    weight: 0,
+        const columns = Math.ceil(graphic.width / PARTICLE)
+        const rows = Math.ceil(graphic.height / PARTICLE)
+        const particles = new Float32Array(columns * rows * 6)
+        let cursor = 0
+        for (let row = 0; row < rows; row++) {
+            const top = Math.round(row * PARTICLE * scaleY)
+            const bottom = Math.min(height, Math.round((row + 1) * PARTICLE * scaleY))
+            for (let column = 0; column < columns; column++) {
+                const left = Math.round(column * PARTICLE * scale)
+                const right = Math.min(width, Math.round((column + 1) * PARTICLE * scale))
+                let hasCoverage = false
+                for (let y = top; y < bottom && !hasCoverage; y++) {
+                    for (let x = left; x < right; x++) {
+                        if (data[(y * width + x) * 4]) {
+                            hasCoverage = true
+                            break
+                        }
+                    }
                 }
-                behaviour.prepare?.(tile)
-                nextTiles.push(tile)
-                rectangles.push(left, top, right - left, bottom - top)
+                if (!hasCoverage) continue
+                particles[cursor++] = left
+                particles[cursor++] = top
+                particles[cursor++] = right - left
+                particles[cursor++] = bottom - top
+                particles[cursor++] = Math.random()
+                particles[cursor++] = Math.random()
             }
         }
-
-        tiles = nextTiles
-        const count = tiles.length
-        delay = Float32Array.from(tiles, behaviour.introDelay)
-        offsetX = new Float32Array(count)
-        offsetY = new Float32Array(count)
-        speedX = new Float32Array(count)
-        speedY = new Float32Array(count)
-        glow = new Float32Array(count)
-        state = new Float32Array(count * 4)
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, rectangleBuffer)
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rectangles), gl.STATIC_DRAW)
-        gl.bindBuffer(gl.ARRAY_BUFFER, stateBuffer)
-        gl.bufferData(gl.ARRAY_BUFFER, state, gl.DYNAMIC_DRAW)
+        particleCount = cursor / 6
+        gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer)
+        gl.bufferData(gl.ARRAY_BUFFER, particles.subarray(0, cursor), gl.STATIC_DRAW)
         return true
     }
 
@@ -324,7 +370,7 @@ export function animateGraphic(
         gl.clear(gl.COLOR_BUFFER_BIT)
 
         if (!isArmed) {
-            for (let index = 0; index < tiles.length; index++) {
+            for (let index = 0; index < count; index++) {
                 const tile = tiles[index]
                 force.x = 0
                 force.y = 0
@@ -372,25 +418,23 @@ export function animateGraphic(
                             behaviour.introOffset(tile, (1 - progress) ** 3, introForce)
                             moveX += introForce.x
                             moveY += introForce.y
-                            alpha = Math.min(1, progress * 2.5)
+                            alpha = Math.min(1, progress * 1.6)
                         }
                     }
                 }
 
                 const slot = index * 4
-                const isHome = moveX * moveX + moveY * moveY < DEAD_ZONE * DEAD_ZONE
-                // Whole device pixels: this is what keeps every frame pixel-sharp.
-                state[slot] = isHome ? 0 : Math.round(moveX * scale)
-                state[slot + 1] = isHome ? 0 : Math.round(moveY * scaleY)
-                state[slot + 2] = Math.min(MAX_GLOW, glow[index])
-                state[slot + 3] = alpha
+                nodeData[slot] = moveX
+                nodeData[slot + 1] = moveY
+                nodeData[slot + 2] = glow[index]
+                nodeData[slot + 3] = alpha
             }
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, stateBuffer)
-            gl.bufferSubData(gl.ARRAY_BUFFER, 0, state)
+            gl.activeTexture(gl.TEXTURE1)
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, nodeColumns, nodeRows, gl.RGBA, gl.FLOAT, nodeData)
             gl.uniform1i(isCoreUniform, 0)
             gl.uniform4f(channelUniform, 1, 0, 0, 0)
-            gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, tiles.length)
+            gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, particleCount)
 
             if (graphic.core) {
                 if (behaviour.coreBeatMs && energy > 0.5) {

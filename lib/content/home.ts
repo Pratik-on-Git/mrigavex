@@ -15,9 +15,9 @@
 import type { LeadSource } from "../leadConfig.ts"
 
 const GRAPHIC = {
-    starburst: "/img/base/Group 1410188788.png",
-    loops: "/img/base/Group 1410188789.png",
-    target: "/img/base/Group 1410188791.png",
+    starburst: "/img/base/starburst.svg",
+    loops: "/img/base/loops.svg",
+    target: "/img/base/target.svg",
 }
 
 export const HOME_CONTENT = {
@@ -54,12 +54,11 @@ export const HOME_CONTENT = {
         eyebrow: "Our expertise",
         title: ["Complex Challenges.", "Clear Direction."],
         support: "Independent thinking, deep sector knowledge and a practical path from strategy to execution.",
-        // The images are traced from the PNGs in GRAPHIC by scripts/trace-graphics.mts.
         cards: [
             {
                 id: "ai-strategy",
                 topic: "ai",
-                image: { src: "/img/base/starburst.svg" },
+                image: { src: GRAPHIC.starburst },
                 particles: "burst",
                 title: "AI Strategy & Technology Transformation",
                 body: "Turn emerging technology into practical competitive advantage, from AI strategy and governance to adoption at enterprise scale.",
@@ -68,7 +67,7 @@ export const HOME_CONTENT = {
             {
                 id: "financial-services",
                 topic: "financial",
-                image: { src: "/img/base/loops.svg" },
+                image: { src: GRAPHIC.loops },
                 particles: "loops",
                 title: "Financial Services Transformation",
                 body: "Navigate Fintech disruption, modernise core platforms and build the operating models that move financial institutions forward.",
@@ -77,7 +76,7 @@ export const HOME_CONTENT = {
             {
                 id: "venture-growth",
                 topic: "venture",
-                image: { src: "/img/base/target.svg" },
+                image: { src: GRAPHIC.target },
                 particles: "target",
                 title: "Responsible Venture & Business Growth",
                 body: "Build meaningful partnerships, assess investment opportunities and enter new markets with informed, sustainable ambition.",

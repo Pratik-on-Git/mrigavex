@@ -1,5 +1,6 @@
 // Traces the expertise graphics into the SVGs in public/img/base that ParticleGraphic
-// animates. Run it only if a source PNG changes:
+// animates. The source PNGs aren't kept in the repo, so to retrace, put them back in
+// that folder under the names in GRAPHICS below, then run:
 //
 //     node scripts/trace-graphics.mts
 //
